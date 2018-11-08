@@ -1,15 +1,8 @@
-//
-//  main.cpp
-//  sessionjsonreader
-//
-//  Created by asdfuiop on 10/12/18.
-//  Copyright © 2018 asdfuiop. All rights reserved.
-//
-
 //replace this with the mozilla backup file, recovery.jsonlz4
 //maybe switch to a grid?
 //find a way to show urls
 //update listbox everytime
+//update file_infos everytime
 //add button fuctionality (replace, save)
 //add preferences dialog
 
@@ -26,8 +19,9 @@
 #include <memory>
 #include <wx/artprov.h>
 #include <wx/dir.h>
-#include <boost/filesystem.hpp>
+#include <boost/filesystem.hpp> //check if I really need this at end
 #include <ctime>
+#include <stdio.h>
 
 
 #ifdef _WIN32
@@ -76,7 +70,7 @@ struct pert_file_info
 
 bool compare_file_infos(pert_file_info& i, pert_file_info& j)
 {
-    return i.last_write_time > j.last_write_time;
+    return i.last_write_time < j.last_write_time;
 }
 
 union chars_to_int
@@ -91,44 +85,62 @@ struct tab_info
     std::string url;
 };
 
-bool after_specified_time(int number, std::string unit, tm* now, tm* time_to_compare)
+bool after_specified_time(int number, std::string unit, std::time_t now, std::time_t time_to_compare)
 {
-    int years_since = now->tm_year - time_to_compare->tm_year;
-    int months_since = now->tm_mon - time_to_compare -> tm_mon;
-    int days_since = now->tm_mday - time_to_compare->tm_mday;
-    int hours_since = now->tm_hour - time_to_compare ->tm_hour;
-    int mins_since = now->tm_min - time_to_compare->tm_min;
-    if (years_since > 0)
+    tm now_nice = *std::localtime(&now);
+    tm time_to_compare_nice = *std::localtime(&time_to_compare);
+    int years_since = now_nice.tm_year - time_to_compare_nice.tm_year;
+    int months_since = now_nice.tm_mon - time_to_compare_nice. tm_mon;
+    int days_since = now_nice.tm_mday - time_to_compare_nice.tm_mday;
+    int hours_since = now_nice.tm_hour - time_to_compare_nice.tm_hour;
+    int mins_since = now_nice.tm_min - time_to_compare_nice.tm_min;
+    if (unit == "years")
     {
-        if (unit != "years" || years_since>number)
+        if (years_since > number)
+        {
+            return true;
+        }
+        else if (years_since == number && months_since>0)
         {
             return true;
         }
     }
-    else if (months_since > 0)
+    else if (unit == "months")
     {
-        if (unit != "months" || months_since > number)
+        if (months_since > number)
+        {
+            return true;
+        }
+        else if (months_since == number && days_since>0)
         {
             return true;
         }
     }
-    else if (days_since > 0 )
+    else if (unit == "days")
     {
-        if (unit != "days" || days_since>number)
+        if (days_since > number)
+        {
+            return true;
+        }
+        else if (days_since == number && hours_since>0)
         {
             return true;
         }
     }
-    else if (hours_since > 0 )
+    else if (unit == "hrs")
     {
-        if (unit != "hrs" || hours_since>number)
+        if (hours_since > number)
+        {
+            return true;
+        }
+        else if (hours_since == number && mins_since>0)
         {
             return true;
         }
     }
-    else if (mins_since > 0)
+    else if (unit == "mins")
     {
-        if (unit != "mins" || mins_since>number)
+        if (mins_since >= number)
         {
             return true;
         }
@@ -190,6 +202,7 @@ std::vector<pert_file_info> get_important_file_info (std::string path_to_jsonlz4
     }
     std::sort(to_return.begin(), to_return.end(), compare_file_infos);
     return to_return;
+    //oldest is first
 }
 
 class application_window : public wxFrame
@@ -271,7 +284,6 @@ public:
             json_listbox->Append(file.file_name + " saved at " + hour_minute + " on " + month_year_date);
         }
         
-        json_listbox->Append("Uno");
         Bind(wxEVT_COMMAND_LISTBOX_SELECTED, &application_window::json_listbox_click, this, ID_json_listbox);
         tab_listbox = new wxListBox(panel_parent, ID_tab_listbox, wxPoint(-1, -1), wxSize(-1, -1));
         
@@ -290,7 +302,7 @@ public:
         panel_parent->SetSizer(vert_box_sizer);
         
         autosave_timer = new wxTimer(this, ID_timer);
-        int milliseconds_between = loaded_preferences["autosave freq (minutes)"].get<int>() * 1000;
+        int milliseconds_between = loaded_preferences["autosave freq (minutes)"].get<int>() * 60 * 1000;
         autosave_timer->Start(milliseconds_between);
         Bind(wxEVT_TIMER, &application_window::autosave, this, ID_timer);
         this->Center();
@@ -300,6 +312,7 @@ public:
         toolbar->AddTool(wxID_EXIT, wxT("Credits"), credits);
         toolbar->AddTool(wxID_EXIT, wxT("Preferences"), preferences);
         toolbar->Realize();
+        check_for_deletions();
     }
     /*
      if (sel== 0)
@@ -391,7 +404,6 @@ private:
         int destination_capacity = get_decomp_size.equiv_int;
         char* destination = new char[destination_capacity];
         int returned_num = LZ4_decompress_safe(compressed_session_info.data(), destination, compressed_session_info.size(), destination_capacity);
-        std::ofstream output("actual_text.json");
         std::vector<char> destination_holder(destination, destination+destination_capacity);
         delete[] destination;
         
@@ -430,9 +442,8 @@ private:
             }
             window_num+=1;
         }
-        output << session_info.dump(4);
-        struct stat result;
         /*
+        struct stat result;
          std::ifstream  src("from.ogv", std::ios::binary);
          std::ofstream  dst("to.ogv",   std::ios::binary);
          
@@ -460,6 +471,93 @@ private:
         std::cout<<"watup";
     }
     //split this to autosave and check for deletions
+    void check_for_deletions()
+    {
+        file_infos = get_important_file_info(loaded_preferences["backup_path"].get<std::string>());
+        std::time_t current_time = std::time(0);
+        std::vector<pert_file_info*> auto_created_file_infos; //try to assign one of each to preference?
+        int preference_slot_filled = 0;
+        std::vector<std::string> marked_for_deletion;
+        int auto_save_slots = loaded_preferences["save times"].size();
+        std::cout<<auto_save_slots;
+        for (pert_file_info& file : file_infos)
+        {
+            if (file.auto_created)
+            {
+                auto_created_file_infos.push_back(&file);
+            }
+        }
+        int previous_filled = 0;
+        bool has_deleted = false;
+        while (preference_slot_filled < auto_save_slots && preference_slot_filled < auto_created_file_infos.size()) //goes upwards
+        {
+            has_deleted=false;
+            int number_of_units = loaded_preferences["save times"][auto_save_slots-preference_slot_filled-1].get<int>();
+            std::string time_unit = loaded_preferences["save units"][auto_save_slots-preference_slot_filled-1].get<std::string>();
+            if (time_unit != "indef") //automatically takes it if it's indef
+            {
+                for (int i=preference_slot_filled; i<auto_created_file_infos.size(); ++i)
+                {
+                    pert_file_info file = *auto_created_file_infos[i];
+                    if (after_specified_time(number_of_units, time_unit, current_time, file.last_write_time))
+                    {
+                        marked_for_deletion.push_back(file.file_name);
+                        has_deleted=true;
+                    }
+                    else
+                    {
+                        if (marked_for_deletion.size()>0 && has_deleted)
+                        {
+                            previous_filled=i-1;
+                            marked_for_deletion.pop_back();    //once it reaches a file age younger, it chooses the one right before to keep
+                        }
+                        else
+                        {
+                            previous_filled=i;
+                        }
+                        break;
+                    }
+                }
+            }
+            preference_slot_filled+=1;
+        }
+        std::cout<< "\n" << marked_for_deletion.size() << " : ";
+        std::cout<<file_infos.size() <<" : ";
+        for (std::string file_name : marked_for_deletion)
+        {
+            std::string path_to_file = loaded_preferences["backup_path"].get<std::string>() + slash.ToStdString() + file_name;
+            remove(path_to_file.c_str());
+        }
+        if (previous_filled<(auto_created_file_infos.size()-1)) //delete extras at the end
+        {
+            for (int i=previous_filled; i<auto_created_file_infos.size()-1; i++)
+            {
+                std::string to_delete_name = auto_created_file_infos[i]->file_name;
+                std::string path_to_file = loaded_preferences["backup_path"].get<std::string>() + slash.ToStdString() + to_delete_name;
+                remove(path_to_file.c_str());
+            }
+        }
+        file_infos = get_important_file_info(loaded_preferences["backup_path"].get<std::string>());
+        std::cout<<file_infos.size() <<"\n";
+        json_listbox->Clear();
+        for (pert_file_info& file : file_infos)
+        {
+            std::tm* mod_time = std::localtime(&file.last_write_time);
+            //maybe have an option for date formats
+            int two_digit_year;
+            if (mod_time->tm_year>=100)
+            {
+                two_digit_year=mod_time->tm_year-100;
+            }
+            else
+            {
+                two_digit_year=mod_time->tm_year;
+            }
+            wxString hour_minute = wxString::Format(wxT("%i:%i"), mod_time->tm_hour, mod_time->tm_min);
+            wxString month_year_date = wxString::Format(wxT("%i/%i/%i"), mod_time->tm_mon+1, mod_time->tm_mday, two_digit_year);
+            json_listbox->Append(file.file_name + " saved at " + hour_minute + " on " + month_year_date);
+        }
+    }
     void autosave(wxTimerEvent& event)
     {
         std::time_t current_time = std::time(0);
@@ -469,41 +567,7 @@ private:
         std::ifstream src(to_copy_name, std::ios::binary);
         std::ofstream dst(destination_name, std::ios::binary);
         dst << src.rdbuf();
-        std::vector<pert_file_info*> auto_created_file_infos; //try to assign one of each to preference?
-        int preference_slot_filled = 0;
-        std::vector<std::string> marked_for_deletion;
-        int auto_save_slots = loaded_preferences["save_times"].size();
-        for (pert_file_info& file : file_infos)
-        {
-            if (file.auto_created)
-            {
-                auto_created_file_infos.push_back(&file);
-            }
-        }
-        while (preference_slot_filled < auto_save_slots && preference_slot_filled < auto_created_file_infos.size()) //goes upwards
-        {
-            int number_of_units = loaded_preferences["save times"][auto_save_slots-preference_slot_filled].get<int>();
-            std::string time_unit = loaded_preferences["save units"][auto_save_slots-preference_slot_filled].get<std::string>();
-            if (time_unit != "indef") //automatically takes it if it's indef
-            {
-                for (int i=preference_slot_filled; i<auto_created_file_infos.size(); ++i)
-                {
-                    pert_file_info file = *auto_created_file_infos[i];
-                    tm* file_age = std::localtime(&file.last_write_time);
-                    if (after_specified_time(number_of_units, time_unit, current_time_nice, file_age))
-                    {
-                        marked_for_deletion.push_back(file.file_name);
-                    }
-                    else
-                    {
-                        marked_for_deletion.pop_back(); //once it reaches a file age younger, it chooses the one right before to keep
-                        break;
-                    }
-                }
-            }
-            preference_slot_filled+=1;
-        }
-        std::cout<<"whoohoo";
+        check_for_deletions();
     }
     wxDECLARE_EVENT_TABLE();
 };
