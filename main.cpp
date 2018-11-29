@@ -205,6 +205,21 @@ std::vector<pert_file_info> get_important_file_info (std::string path_to_jsonlz4
     //oldest is first
 }
 
+//class save_name_dialog: public wxDialog
+//{
+//public:
+//    save_name_dialog(const wxString & title) : wxDialog (NULL, -1, title, wxDefaultPosition, wxSize(250, 200))
+//    {
+//        wxPanel* save_dialog_panel = new wxPanel(this, wxID_ANY);
+//        wxTextCtrl* rename_box = new wxTextCtrl(save_dialog_panel, -1, wxT(""), wxPoint(-1, -1));
+//        wxButton* ok_button = new wxButton(save_dialog_panel, ID_ok_save, wxT("Ok"));
+//        Bind(wxEVT_BUTTON, )
+//    }
+//private:
+//    const int ID_ok_save = 201;
+//};
+
+
 class application_window : public wxFrame
 {
 public:
@@ -266,43 +281,29 @@ public:
         wxStaticText* jsons_title = new wxStaticText(panel_parent, wxID_ANY, wxT("Session JSONs"));
         wxStaticText* tabs_title = new wxStaticText(panel_parent, wxID_ANY, wxT("Windows and Tabs in Session"));
         json_listbox = new wxListBox(panel_parent, ID_json_listbox, wxPoint(-1, -1), wxSize(300, -1));
-        for (pert_file_info& file : file_infos)
-        {
-            std::tm* mod_time = std::localtime(&file.last_write_time);
-            //maybe have an option for date formats
-            int two_digit_year;
-            if (mod_time->tm_year>=100)
-            {
-                two_digit_year=mod_time->tm_year-100;
-            }
-            else
-            {
-                two_digit_year=mod_time->tm_year;
-            }
-            wxString hour_minute = wxString::Format(wxT("%i:%i"), mod_time->tm_hour, mod_time->tm_min);
-            wxString month_year_date = wxString::Format(wxT("%i/%i/%i"), mod_time->tm_mon+1, mod_time->tm_mday, two_digit_year);
-            json_listbox->Append(file.file_name + " saved at " + hour_minute + " on " + month_year_date);
-        }
+        populate_json_listbox();
         
         Bind(wxEVT_COMMAND_LISTBOX_SELECTED, &application_window::json_listbox_click, this, ID_json_listbox);
         tab_listbox = new wxListBox(panel_parent, ID_tab_listbox, wxPoint(-1, -1), wxSize(-1, -1));
         
+        wxButton* replace_button = new wxButton(panel_parent, ID_replace_button, wxT("Replace!"));
+        wxButton* save_button = new wxButton(panel_parent, ID_save_button, wxT("Save"));
+        Bind(wxEVT_BUTTON, &application_window::save, this, ID_save_button);
+        Bind(wxEVT_BUTTON, &application_window::replace, this, ID_replace_button);
         jsons_box_sizer->Add(jsons_title, 0, wxBOTTOM, 5);
         jsons_box_sizer->Add(json_listbox, 1, wxEXPAND);
+        jsons_box_sizer->Add(save_button, 0, wxALIGN_RIGHT | wxALL, 5);
         tabs_box_sizer->Add(tabs_title, 0, wxBOTTOM, 5);
         tabs_box_sizer->Add(tab_listbox, 1, wxEXPAND);
+        tabs_box_sizer->Add(replace_button, 0, wxALIGN_RIGHT | wxALL, 5);
         jsons_and_tabs_box_sizer->Add(jsons_box_sizer, 1, wxEXPAND | wxALL, 5);
         jsons_and_tabs_box_sizer->Add(tabs_box_sizer, 2, wxEXPAND | wxALL, 5);
         vert_box_sizer->Add(jsons_and_tabs_box_sizer, 1, wxEXPAND | wxALL, 10);
-        
-        
-        wxButton* replace_button = new wxButton(panel_parent, wxID_ANY, wxT("Replace!"));
-        vert_box_sizer->Add(replace_button, 0, wxALIGN_RIGHT | wxALL, 5);
-        
+    
         panel_parent->SetSizer(vert_box_sizer);
         
         autosave_timer = new wxTimer(this, ID_timer);
-        int milliseconds_between = loaded_preferences["autosave freq (minutes)"].get<int>() * 60 * 1000;
+        int milliseconds_between = loaded_preferences["autosave freq (minutes)"].get<int>() * 1000 * 60;
         autosave_timer->Start(milliseconds_between);
         Bind(wxEVT_TIMER, &application_window::autosave, this, ID_timer);
         this->Center();
@@ -358,9 +359,33 @@ private:
     const int ID_json_listbox = 103;
     const int ID_tab_listbox = 104;
     const int ID_timer = 105;
+    const int ID_save_button = 106;
+    const int ID_replace_button = 107;
     void on_exit(wxCommandEvent& event)
     {
         Close(true);
+    }
+    void populate_json_listbox()
+    {
+        file_infos = get_important_file_info(loaded_preferences["backup_path"].get<std::string>());
+        json_listbox->Clear();
+        for (pert_file_info& file : file_infos)
+        {
+            std::tm* mod_time = std::localtime(&file.last_write_time);
+            //maybe have an option for date formats
+            int two_digit_year;
+            if (mod_time->tm_year>=100)
+            {
+                two_digit_year=mod_time->tm_year-100;
+            }
+            else
+            {
+                two_digit_year=mod_time->tm_year;
+            }
+            wxString hour_minute = wxString::Format(wxT("%i:%i"), mod_time->tm_hour, mod_time->tm_min);
+            wxString month_year_date = wxString::Format(wxT("%i/%i/%i"), mod_time->tm_mon+1, mod_time->tm_mday, two_digit_year);
+            json_listbox->Append(file.file_name + " saved at " + hour_minute + " on " + month_year_date);
+        }
     }
     void json_listbox_click(wxCommandEvent& event)
     {
@@ -425,19 +450,16 @@ private:
                 {
                     std::string current_tab_name = current_entry["title"];
                     tab_listbox->Append(current_tab_name);
-                    std::cout<<current_tab_name<<"\n";
                 }
                 else if (current_entry.find("url") != current_entry.end())
                 {
                     std::string current_tab_name = current_entry["url"];
                     tab_listbox->Append(current_tab_name);
-                    std::cout<<current_tab_name<<"\n";
                 }
                 else
                 {
                     std::string current_tab_name = "No Title or Url found";
                     tab_listbox->Append(current_tab_name);
-                    std::cout<<current_tab_name<<"\n";
                 }
             }
             window_num+=1;
@@ -469,6 +491,54 @@ private:
             mozilla_path_text->SetValue(file_name);
         }
         std::cout<<"watup";
+    }
+    void save(wxCommandEvent& event)
+    {
+        int sel = json_listbox->GetSelection();
+        if (sel != -1)
+        {
+            wxString current_name = file_infos[sel].file_name;
+            std::string equiv_current = current_name.ToStdString();
+            std::string autosaved_string = "autosave";
+            if (equiv_current.find(autosaved_string) != std::string::npos)
+            {
+                equiv_current.replace(equiv_current.find(autosaved_string), autosaved_string.length(), "");
+            }
+            wxString automatic_name = wxString(equiv_current);
+            wxTextEntryDialog* get_save_name = new wxTextEntryDialog(NULL, wxT("Name the save file"), automatic_name);
+            get_save_name->ShowModal();
+            wxString to_save_name = get_save_name->GetValue();
+            std::string old = loaded_preferences["backup_path"].get<std::string>()+slash.ToStdString()+file_infos[sel].file_name;
+            std::string new_saved = loaded_preferences["backup_path"].get<std::string>()+slash.ToStdString()+to_save_name.ToStdString()+".jsonlz4";
+            std::ifstream src(old, std::ios::binary);
+            std::ofstream dst(new_saved, std::ios::binary);
+            dst << src.rdbuf();
+            populate_json_listbox();
+        }
+        else
+        {
+            wxMessageDialog* wrong = new wxMessageDialog(NULL, wxT("Be sure to choose a backup first"), wxT("Error"), wxOK);
+            wrong->ShowModal();
+        }
+    }
+    void replace(wxCommandEvent& event)
+    {
+        int sel = json_listbox->GetSelection();
+        if (sel != -1)
+        {
+            wxMessageDialog* closed_firefox = new wxMessageDialog(NULL, wxT("Be sure to close Firefox first"), wxT("Info"), wxOK);
+            closed_firefox->ShowModal();
+            std::string to_use = loaded_preferences["backup_path"].get<std::string>()+slash.ToStdString()+file_infos[sel].file_name;
+            std::string replacing = loaded_preferences["mozilla_path"].get<std::string>() + slash.ToStdString() + "recovery.jsonlz4";
+            std::ifstream src(to_use, std::ios::binary);
+            std::ofstream dst(replacing, std::ios::binary);
+            dst << src.rdbuf();
+        }
+        else
+        {
+            wxMessageDialog* wrong = new wxMessageDialog(NULL, wxT("Be sure to choose a backup first"), wxT("Error"), wxOK);
+            wrong->ShowModal();
+        }
     }
     //split this to autosave and check for deletions
     void check_for_deletions()
@@ -539,24 +609,7 @@ private:
         }
         file_infos = get_important_file_info(loaded_preferences["backup_path"].get<std::string>());
         std::cout<<file_infos.size() <<"\n";
-        json_listbox->Clear();
-        for (pert_file_info& file : file_infos)
-        {
-            std::tm* mod_time = std::localtime(&file.last_write_time);
-            //maybe have an option for date formats
-            int two_digit_year;
-            if (mod_time->tm_year>=100)
-            {
-                two_digit_year=mod_time->tm_year-100;
-            }
-            else
-            {
-                two_digit_year=mod_time->tm_year;
-            }
-            wxString hour_minute = wxString::Format(wxT("%i:%i"), mod_time->tm_hour, mod_time->tm_min);
-            wxString month_year_date = wxString::Format(wxT("%i/%i/%i"), mod_time->tm_mon+1, mod_time->tm_mday, two_digit_year);
-            json_listbox->Append(file.file_name + " saved at " + hour_minute + " on " + month_year_date);
-        }
+        populate_json_listbox();
     }
     void autosave(wxTimerEvent& event)
     {
